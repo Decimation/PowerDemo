@@ -10,7 +10,7 @@ public static class Program
 			                      @"I:\Steam\steamapps\common\Team Fortress 2\tf\autorecorded\autorecording_2023-11-01_02-07-08.dem"));
 		df.Parse();
 
-		foreach (DemoFile.DemoMessage message in df.Messages) {
+		foreach (BaseDemoCommand message in df.Messages) {
 			Console.WriteLine($"{message.Type}");
 		}
 	}

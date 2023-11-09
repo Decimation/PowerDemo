@@ -1,91 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using Novus.Streams;
 
 namespace PowerDemo.Lib;
 
 public class DemoFile
 {
 
-	public struct DemoInfo
-	{
-
-		public int    DemoProtocol, NetProtocol, TickCount, FrameCount, SignonLength;
-		public string ServerName,   ClientName,  MapName,   GameDirectory;
-		public float  Seconds;
-
-	}
-
-	public enum MessageType:byte
-	{
-
-		Signon = 1,
-		Packet,
-		SyncTick,
-		ConsoleCmd,
-		UserCmd,
-		DataTables,
-		Stop,
-
-		// CustomData, // L4D2
-		StringTables
-
-	}
-
-	public class DemoMessage
-	{
-
-		public MessageType Type;
-		public int         Tick;
-		public byte[]      Data;
-
-		public virtual bool Read(BinaryReader r)
-		{
-			return true;
-		}
-
-	}
-	
-	public class SignonMessage : DemoMessage
-	{
-
-		public override bool Read(BinaryReader r)
-		{
-			return base.Read(r);
-		}
-
-	}
-
-	public class TimestampedDemoCommand: DemoMessage
-	{
-
-		public override bool Read(BinaryReader r)
-		{
-			Tick = r.ReadInt32();
-			return base.Read(r);
-		}
-
-	}
-	public class PacketMessage : TimestampedDemoCommand
-	{
-
-		public override bool Read(BinaryReader r)
-		{
-			return base.Read(r);
-		}
-
-	}
-
-	Stream                   fstream;
-	public DemoInfo          Info;
-	public List<DemoMessage> Messages;
+	Stream                       fstream;
+	public DemoInfo              Info;
+	public List<BaseDemoCommand> Messages;
 
 	public DemoFile(Stream s)
 	{
 		fstream  = s;
-		Messages = new List<DemoMessage>();
+		Messages = new List<BaseDemoCommand>();
 		Parse();
 	}
 
@@ -145,12 +78,21 @@ public class DemoFile
 			Messages.Add(msg);
 		}*/
 
-		while (true)
-		{
-			var msg = new DemoMessage { Type = (MessageType)reader.ReadByte() };
+		while (true) {
+			var type = (DemoCommandType) reader.ReadByte();
 
-			if (msg.Type == MessageType.Stop)
-				break;
+			BaseDemoCommand msg;
+
+			switch (type) {
+				default:
+				case DemoCommandType.Stop:
+					break;
+				case DemoCommandType.ConsoleCmd:
+					msg = new DemoConsoleCommand();
+					msg.Read(reader);
+					break;
+
+			}
 
 			/*msg.Tick = reader.ReadInt32();
 
@@ -178,5 +120,160 @@ public class DemoFile
 			Messages.Add(msg);*/
 		}
 	}
+
+}
+
+public struct DemoInfo
+{
+
+	public int    DemoProtocol, NetProtocol, TickCount, FrameCount, SignonLength;
+	public string ServerName,   ClientName,  MapName,   GameDirectory;
+	public float  Seconds;
+
+}
+
+public class DemoConsoleCommand : TimestampedDemoCommand
+{
+
+	public string Command { get; private set; }
+
+	public override bool Read(BinaryReader r)
+	{
+		var b = base.Read(r);
+		var i = r.ReadInt32();
+		Command = r.ReadCString(i);
+		return b;
+	}
+
+}
+
+interface IStreamElement
+{
+
+	public bool Read(BinaryReader r);
+
+}
+
+/// <summary>
+/// https://github.com/PazerOP/DemoLib2/blob/master/DemoLib2/demos/DemoViewpoint.cpp
+/// https://github.com/PazerOP/DemoLib2/blob/master/DemoLib2/demos/DemoViewpoint.hpp
+/// https://github.com/PazerOP/DemoLib2/blob/master/DemoLib2/demos/DemoViewpointFlags.hpp
+/// </summary>
+public class DemoViewpoint : IStreamElement
+{
+
+	private DemoViewpointFlags m_flags;
+	private Vector3            m_viewOrigin1;
+	private Vector3            m_viewAngles1;
+	private Vector3            m_localViewAngles1;
+
+	private Vector3 m_viewOrigin2;
+	private Vector3 m_viewAngles2;
+	private Vector3 m_localViewAngles2;
+
+	public bool Read(BinaryReader r)
+	{
+		m_flags            = (DemoViewpointFlags) r.ReadInt32();
+		m_viewOrigin1      = r.ReadVec();
+		m_viewAngles1      = r.ReadVec();
+		m_localViewAngles1 = r.ReadVec();
+		m_viewOrigin2      = r.ReadVec();
+		m_viewAngles2      = r.ReadVec();
+		m_localViewAngles2 = r.ReadVec();
+
+		return true;
+	}
+
+}
+
+static class BinaryReaderExtensions
+{
+
+	public static Vector3 ReadVec(this BinaryReader r)
+	{
+		return new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
+	}
+
+	/*public static TEnum ReadEnum<TEnum>(this BinaryReader r) where TEnum : Enum
+	{
+		var under = Enum.GetUnderlyingType(typeof(TEnum));
+
+		if (under == typeof(byte)) {
+			return (TEnum) r.ReadByte();
+		}
+	}*/
+
+}
+
+public enum DemoViewpointFlags : int
+{
+
+	None       = 0,
+	UseOrigin2 = 1 << 0,
+	UseAngles2 = 1 << 1,
+	NoInterp   = 1 << 2
+
+}
+
+public class DemoPacketCommand : TimestampedDemoCommand
+{
+
+	public override bool Read(BinaryReader r)
+	{
+		return base.Read(r);
+	}
+
+}
+
+public class TimestampedDemoCommand : BaseDemoCommand
+{
+
+	public override bool Read(BinaryReader r)
+	{
+		Tick = r.ReadInt32();
+		return base.Read(r);
+	}
+
+}
+
+public class DemoSignonCommand : DemoPacketCommand
+{
+
+	public override bool Read(BinaryReader r)
+	{
+		return base.Read(r);
+	}
+
+}
+
+public class BaseDemoCommand : IStreamElement
+{
+
+	public DemoCommandType Type;
+	public int         Tick;
+	public byte[]      Data;
+
+	public virtual bool Read(BinaryReader r)
+	{
+		return true;
+	}
+
+}
+
+public enum DemoCommandType : byte
+{
+
+	Invalid = 0,
+	Signon  = 1,
+	Packet,
+	SyncTick,
+	ConsoleCmd,
+	UserCmd,
+	DataTables,
+	Stop,
+
+	// CustomData, // L4D2
+	StringTables,
+	LastCmd = StringTables
 
 }
